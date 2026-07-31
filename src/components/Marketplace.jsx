@@ -1,0 +1,366 @@
+import React, { useState, useEffect } from 'react';
+import { Briefcase, FileText, Calendar, Lock, CheckCircle, ArrowRight, ShieldAlert, Award, Music, Users } from 'lucide-react';
+import UpiCheckout from './UpiCheckout';
+
+export default function Marketplace() {
+  const [gigs, setGigs] = useState([]);
+  const [jams, setJams] = useState([]);
+  const [activeTab, setActiveTab] = useState('explore'); // 'explore' (shows) | 'jam-circles' | 'my-bookings' (confirmed)
+  
+  const [showContractModal, setShowContractModal] = useState(null); // Gig object or null
+  const [showUpiModal, setShowUpiModal] = useState(null); // Gig object or null
+  const [successBooking, setSuccessBooking] = useState(false);
+  const [successRsvp, setSuccessRsvp] = useState(false);
+
+  const fetchGigs = () => {
+    fetch('http://localhost:3001/api/gigs')
+      .then(res => res.json())
+      .then(data => {
+        const mapped = data.map(g => ({
+          id: g.id,
+          venue: g.venue,
+          event: g.event,
+          date: g.date,
+          time: g.time,
+          pay: g.pay,
+          status: g.status,
+          contractDetails: g.contract_details,
+          hirer: g.hirer
+        }));
+        setGigs(mapped);
+      })
+      .catch(err => console.error("Error loading gigs:", err));
+  };
+
+  const fetchJams = () => {
+    fetch('http://localhost:3001/api/jams')
+      .then(res => res.json())
+      .then(data => setJams(data))
+      .catch(err => console.error("Error loading jam sessions:", err));
+  };
+
+  useEffect(() => {
+    fetchGigs();
+    fetchJams();
+  }, []);
+
+  const handleApplyGig = (gig) => {
+    setShowContractModal(gig);
+  };
+
+  const handleSignContract = (gig) => {
+    setShowContractModal(null);
+    setShowUpiModal(gig);
+  };
+
+  const handleUpiSuccess = (gigId) => {
+    fetch('http://localhost:3001/api/bookings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ gigId, bandLeaderId: 3 })
+    })
+    .then(res => res.json())
+    .then(() => {
+      fetchGigs();
+      setShowUpiModal(null);
+      setSuccessBooking(true);
+      setTimeout(() => setSuccessBooking(false), 4000);
+    })
+    .catch(err => console.error("Error booking gig:", err));
+  };
+
+  const handleRsvpJam = (jamId) => {
+    fetch('http://localhost:3001/api/jams/rsvp', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jamId, userId: 3 })
+    })
+    .then(res => res.json())
+    .then(() => {
+      fetchJams();
+      setSuccessRsvp(true);
+      setTimeout(() => setSuccessRsvp(false), 4000);
+    })
+    .catch(err => console.error("Error RSVP-ing to jam:", err));
+  };
+
+  return (
+    <div className="marketplace-container">
+      {/* Header */}
+      <div className="marketplace-header" style={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch', gap: '12px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div>
+            <h2 className="section-title">Shows Board</h2>
+            <p className="subtitle">Secure show contracts & casual jam circles</p>
+          </div>
+        </div>
+        
+        {/* Board Tab Selectors */}
+        <div className="sub-tab-selectors" style={{ display: 'flex', width: '100%' }}>
+          <button 
+            className={`sub-tab ${activeTab === 'explore' ? 'active' : ''}`}
+            onClick={() => setActiveTab('explore')}
+            style={{ flex: 1, textAlign: 'center' }}
+          >
+            Open Shows
+          </button>
+          <button 
+            className={`sub-tab ${activeTab === 'jam-circles' ? 'active' : ''}`}
+            onClick={() => setActiveTab('jam-circles')}
+            style={{ flex: 1, textAlign: 'center' }}
+          >
+            Jam Circles
+          </button>
+          <button 
+            className={`sub-tab ${activeTab === 'my-bookings' ? 'active' : ''}`}
+            onClick={() => setActiveTab('my-bookings')}
+            style={{ flex: 1, textAlign: 'center' }}
+          >
+            My Bookings
+          </button>
+        </div>
+      </div>
+
+      {successBooking && (
+        <div className="alert-success glass-card slide-in">
+          <Award size={20} className="success-icon" />
+          <div>
+            <h4>Booking Confirmed!</h4>
+            <p>Advance Payment is locked in safety vault. Review your bookings tab.</p>
+          </div>
+        </div>
+      )}
+
+      {successRsvp && (
+        <div className="alert-success glass-card slide-in">
+          <CheckCircle size={20} className="success-icon" />
+          <div>
+            <h4>RSVP Registered!</h4>
+            <p>Your slot is locked. Check Notifications for details.</p>
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'explore' && (
+        /* Explore Open Shows */
+        <div className="gigs-list">
+          {gigs.filter(g => g.status === 'Open').length === 0 ? (
+            <div className="empty-state glass-card">
+              <CheckCircle size={40} className="empty-icon" />
+              <h3>All Shows Booked!</h3>
+              <p>Check back soon. Venues post new shows weekly.</p>
+            </div>
+          ) : (
+            gigs.filter(g => g.status === 'Open').map(g => (
+              <div key={g.id} className="gig-card glass-card">
+                <div className="gig-header">
+                  <div>
+                    <h3 className="gig-title">{g.event}</h3>
+                    <span className="gig-venue">{g.venue}</span>
+                  </div>
+                  <span className="gig-pay">{g.pay}</span>
+                </div>
+
+                <div className="gig-details">
+                  <div className="detail-item">
+                    <Calendar size={14} />
+                    <span>{g.date} at {g.time}</span>
+                  </div>
+                  <p className="gig-rules"><strong>Performance Requirements:</strong> {g.contractDetails}</p>
+                </div>
+
+                <div className="gig-footer">
+                  <div className="escrow-badge" style={{ background: 'rgba(6,182,212,0.08)', borderColor: 'rgba(6,182,212,0.25)', color: 'var(--accent-cyan)' }}>
+                    <Lock size={12} />
+                    <span>Advance Locked</span>
+                  </div>
+                  <button 
+                    className="btn btn-primary"
+                    onClick={() => handleApplyGig(g)}
+                    style={{ padding: '8px 16px', fontSize: '0.85rem' }}
+                  >
+                    Apply Now <ArrowRight size={14} />
+                  </button>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      )}
+
+      {activeTab === 'jam-circles' && (
+        /* Explore Casual Jam Circles */
+        <div className="gigs-list">
+          {jams.length === 0 ? (
+            <div className="empty-state glass-card">
+              <Music size={40} className="empty-icon" />
+              <h3>No Jam Circles Scheduled</h3>
+              <p>Venues will post new sessions soon.</p>
+            </div>
+          ) : (
+            jams.map(jam => (
+              <div key={jam.id} className="gig-card glass-card" style={{ borderColor: 'rgba(6, 182, 212, 0.15)' }}>
+                <div className="gig-header">
+                  <div>
+                    <h3 className="gig-title">{jam.title}</h3>
+                    <span className="gig-venue">{jam.cafe_name}</span>
+                  </div>
+                  <span className="gig-pay" style={{ color: 'var(--accent-cyan)' }}>{jam.entry_fee}</span>
+                </div>
+
+                <div className="gig-details">
+                  <div className="detail-item">
+                    <Calendar size={14} style={{ color: 'var(--accent-cyan)' }} />
+                    <span>{jam.date} at {jam.time}</span>
+                  </div>
+                  <p className="gig-rules"><strong>About Circle:</strong> {jam.description}</p>
+                </div>
+
+                <div className="gig-footer" style={{ borderTop: '1px solid var(--glass-border)', paddingTop: '10px' }}>
+                  <div className="jam-stats" style={{ color: 'var(--text-secondary)', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <Users size={14} style={{ color: 'var(--accent-purple)' }} />
+                    <span>{jam.slots_left} / {jam.slots_total} slots left</span>
+                  </div>
+                  
+                  {jam.slots_left > 0 ? (
+                    <button 
+                      className="btn btn-primary"
+                      onClick={() => handleRsvpJam(jam.id)}
+                      style={{ padding: '8px 16px', fontSize: '0.85rem', background: 'linear-gradient(135deg, var(--accent-cyan), var(--accent-purple))', boxShadow: '0 4px 10px var(--accent-cyan-glow)' }}
+                    >
+                      RSVP Slot <ArrowRight size={14} />
+                    </button>
+                  ) : (
+                    <button 
+                      className="btn btn-secondary" 
+                      disabled
+                      style={{ padding: '8px 16px', fontSize: '0.85rem', opacity: 0.6 }}
+                    >
+                      Full House
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      )}
+
+      {activeTab === 'my-bookings' && (
+        /* Booking & Escrow Management */
+        <div className="my-bookings-list">
+          {gigs.filter(g => g.status === 'In Escrow').length === 0 ? (
+            <div className="empty-state glass-card">
+              <Lock size={40} className="empty-icon" />
+              <h3>No Confirmed Shows</h3>
+              <p>Sign up for shows to see safe advance payments here.</p>
+            </div>
+          ) : (
+            gigs.filter(g => g.status === 'In Escrow').map(g => (
+              <div key={g.id} className="gig-card glass-card contract-active" style={{ borderColor: 'rgba(6,182,212,0.3)' }}>
+                <div className="contract-strip" style={{ background: 'rgba(6,182,212,0.1)', color: 'var(--accent-cyan)' }}>
+                  <Lock size={14} />
+                  <span>Advance Payment Locked</span>
+                </div>
+                
+                <div className="gig-header" style={{ marginTop: '10px' }}>
+                  <div>
+                    <h3 className="gig-title">{g.event}</h3>
+                    <span className="gig-venue">{g.venue}</span>
+                  </div>
+                  <span className="gig-pay text-cyan">{g.pay}</span>
+                </div>
+
+                <div className="escrow-pipeline">
+                  <div className="step completed">
+                    <div className="step-dot">✓</div>
+                    <span>Show Signed</span>
+                  </div>
+                  <div className="step active" style={{ borderColor: 'var(--accent-cyan)' }}>
+                    <div className="step-dot" style={{ background: 'var(--accent-cyan)' }}>🔒</div>
+                    <span style={{ color: 'var(--accent-cyan)' }}>Advance Locked</span>
+                  </div>
+                  <div className="step pending">
+                    <div className="step-dot">○</div>
+                    <span>Payout Released</span>
+                  </div>
+                </div>
+
+                <div className="contract-accordion">
+                  <h4>Booking Agreement:</h4>
+                  <div className="contract-code">
+                    <p><strong>Venue Location:</strong> {g.venue}</p>
+                    <p><strong>Safe Deposit:</strong> {g.pay} locked in safety advance vault. Releases immediately upon gig performance. No cancellation charges apply.</p>
+                    <p><strong>Disputes:</strong> Cafe Bliss Management Board resolution.</p>
+                  </div>
+                </div>
+
+                <div className="gig-footer" style={{ borderTop: '1px solid var(--glass-border)', paddingTop: '15px' }}>
+                  <div className="dispute-helper">
+                    <ShieldAlert size={14} style={{ color: 'var(--text-muted)' }} />
+                    <span>Instant dispute resolution board</span>
+                  </div>
+                  <button 
+                    className="btn btn-secondary"
+                    disabled
+                    style={{ padding: '8px 16px', fontSize: '0.85rem', opacity: 0.6 }}
+                  >
+                    Locked in Advance
+                  </button>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      )}
+
+      {/* Contract Sign Modal */}
+      {showContractModal && (
+        <div className="modal-backdrop">
+          <div className="modal-content glass-card">
+            <h3 className="modal-title">📄 Show Booking Agreement</h3>
+            <p className="modal-subtitle">Verify contract terms before confirming.</p>
+
+            <div className="contract-body">
+              <p><strong>1. Event Title:</strong> {showContractModal.event}</p>
+              <p><strong>2. Cafe Venue:</strong> {showContractModal.venue}</p>
+              <p><strong>3. Date & Time:</strong> {showContractModal.date} | {showContractModal.time}</p>
+              <p><strong>4. Advance Deposit:</strong> {showContractModal.pay} (Guaranteed via UPI Vault lock)</p>
+              <hr style={{ borderColor: 'var(--glass-border)', margin: '12px 0' }} />
+              <p className="legal-clause">
+                By pressing "Confirm & Pay", you will be redirected to the secure UPI gateway to deposit the {showContractModal.pay} advance. 
+                This amount is held in safety vault and released only upon show date confirmation.
+              </p>
+            </div>
+
+            <div className="modal-actions">
+              <button 
+                className="btn btn-secondary"
+                onClick={() => setShowContractModal(null)}
+              >
+                Cancel
+              </button>
+              <button 
+                className="btn btn-primary"
+                onClick={() => handleSignContract(showContractModal)}
+              >
+                Confirm & Pay Advance
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* UPI Checkout Modal */}
+      {showUpiModal && (
+        <UpiCheckout 
+          amount={showUpiModal.pay}
+          eventTitle={showUpiModal.event}
+          venue={showUpiModal.venue}
+          onClose={() => setShowUpiModal(null)}
+          onSuccess={() => handleUpiSuccess(showUpiModal.id)}
+        />
+      )}
+    </div>
+  );
+}
