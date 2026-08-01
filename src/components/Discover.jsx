@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { MapPin, Check, X, Shield, Sparkles, MessageSquare, Play } from 'lucide-react';
+import { API_BASE_URL } from '../config';
 
 export default function Discover({ musicians, onOpenChat }) {
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -17,7 +18,7 @@ export default function Discover({ musicians, onOpenChat }) {
     setSwiped(direction);
 
     // Save swipe to SQLite backend database
-    fetch('http://localhost:3001/api/matches', {
+    fetch(`${API_BASE_URL}/api/matches`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Send, MessageSquare, Award, Sparkles, BookOpen } from 'lucide-react';
+import { API_BASE_URL } from '../config';
 
 export default function CommunityChat({ user }) {
   const [messages, setMessages] = useState([]);
@@ -7,7 +8,7 @@ export default function CommunityChat({ user }) {
   const chatEndRef = useRef(null);
 
   const fetchMessages = () => {
-    fetch('http://localhost:3001/api/community/messages')
+    fetch(`${API_BASE_URL}/api/community/messages`)
       .then(res => res.json())
       .then(data => setMessages(data))
       .catch(err => console.error("Error loading chat:", err));
@@ -35,7 +36,7 @@ export default function CommunityChat({ user }) {
       userRole: `${user.role} (${user.skillLevel})`
     };
 
-    fetch('http://localhost:3001/api/community/messages', {
+    fetch(`${API_BASE_URL}/api/community/messages`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)

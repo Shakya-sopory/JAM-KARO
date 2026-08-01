@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { User, MapPin, Edit2, CheckCircle, Sparkles, Image, Video, Camera } from 'lucide-react';
+import { API_BASE_URL } from '../config';
 
 const INDIAN_GENRES = [
   "Hindustani Classical",
@@ -98,7 +99,7 @@ export default function EditProfile({ user, onProfileUpdated }) {
       formData.append('video', videoFile);
     }
 
-    fetch('http://localhost:3001/api/profiles/update', {
+    fetch(`${API_BASE_URL}/api/profiles/update`, {
       method: 'POST',
       body: formData // Let the browser set multi-part boundary headers automatically
     })

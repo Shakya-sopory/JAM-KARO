@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Briefcase, FileText, Calendar, Lock, CheckCircle, ArrowRight, ShieldAlert, Award, Music, Users } from 'lucide-react';
 import UpiCheckout from './UpiCheckout';
+import { API_BASE_URL } from '../config';
 
 export default function Marketplace() {
   const [gigs, setGigs] = useState([]);
@@ -13,7 +14,7 @@ export default function Marketplace() {
   const [successRsvp, setSuccessRsvp] = useState(false);
 
   const fetchGigs = () => {
-    fetch('http://localhost:3001/api/gigs')
+    fetch(`${API_BASE_URL}/api/gigs`)
       .then(res => res.json())
       .then(data => {
         const mapped = data.map(g => ({
@@ -33,7 +34,7 @@ export default function Marketplace() {
   };
 
   const fetchJams = () => {
-    fetch('http://localhost:3001/api/jams')
+    fetch(`${API_BASE_URL}/api/jams`)
       .then(res => res.json())
       .then(data => setJams(data))
       .catch(err => console.error("Error loading jam sessions:", err));
@@ -54,7 +55,7 @@ export default function Marketplace() {
   };
 
   const handleUpiSuccess = (gigId) => {
-    fetch('http://localhost:3001/api/bookings', {
+    fetch(`${API_BASE_URL}/api/bookings`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ gigId, bandLeaderId: 3 })
@@ -70,7 +71,7 @@ export default function Marketplace() {
   };
 
   const handleRsvpJam = (jamId) => {
-    fetch('http://localhost:3001/api/jams/rsvp', {
+    fetch(`${API_BASE_URL}/api/jams/rsvp`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ jamId, userId: 3 })

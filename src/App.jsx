@@ -9,6 +9,7 @@ import PostGig from './components/PostGig';
 import CommunityChat from './components/CommunityChat';
 import EditProfile from './components/EditProfile';
 import PrivateChat from './components/PrivateChat';
+import { API_BASE_URL } from './config';
 import './App.css';
 
 export default function App() {
@@ -39,7 +40,7 @@ export default function App() {
   }, []);
 
   const fetchMusicians = () => {
-    fetch('http://localhost:3001/api/musicians')
+    fetch(`${API_BASE_URL}/api/musicians`)
       .then((res) => res.json())
       .then((data) => {
         setMusicians(data);
@@ -53,7 +54,7 @@ export default function App() {
 
   const fetchNotifications = () => {
     if (!user) return;
-    fetch(`http://localhost:3001/api/notifications?userId=${user.id}`)
+    fetch(`${API_BASE_URL}/api/notifications?userId=${user.id}`)
       .then(res => res.json())
       .then(data => setNotifications(data))
       .catch(err => console.error("Error loading notifications:", err));
@@ -98,7 +99,7 @@ export default function App() {
     setShowBellDrawer(!showBellDrawer);
     if (!showBellDrawer && user) {
       // Mark notifications as read in backend
-      fetch('http://localhost:3001/api/notifications/read', {
+      fetch(`${API_BASE_URL}/api/notifications/read`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId: user.id })

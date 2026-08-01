@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { ShieldCheck, Phone, ShoppingCart, Info, Sparkles } from 'lucide-react';
+import { API_BASE_URL } from '../config';
 
 export default function GearRentals() {
   const [rentals, setRentals] = useState([]);
   const [successBooking, setSuccessBooking] = useState(null); // booked item ID or null
 
   const fetchRentals = () => {
-    fetch('http://localhost:3001/api/rentals')
+    fetch(`${API_BASE_URL}/api/rentals`)
       .then(res => res.json())
       .then(data => setRentals(data))
       .catch(err => console.error("Error loading rentals:", err));
@@ -17,7 +18,7 @@ export default function GearRentals() {
   }, []);
 
   const handleBookRental = (itemId) => {
-    fetch('http://localhost:3001/api/rentals/book', {
+    fetch(`${API_BASE_URL}/api/rentals/book`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ itemId })

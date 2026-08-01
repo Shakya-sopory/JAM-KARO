@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Mail, Lock, User, Shield, Sparkles, MapPin, Smartphone, CheckCircle, ShieldAlert } from 'lucide-react';
+import { API_BASE_URL } from '../config';
 
 const NASHIK_ZONES = [
   "College Road",
@@ -50,7 +51,7 @@ export default function Auth({ onAuthSuccess }) {
       return;
     }
 
-    fetch('http://localhost:3001/api/auth/send-otp', {
+    fetch(`${API_BASE_URL}/api/auth/send-otp`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ phone, email })
@@ -83,7 +84,7 @@ export default function Auth({ onAuthSuccess }) {
     // Finalize signup in SQLite
     const payload = { email, password, phone, otp: inputOtp, userType, name, neighborhood, role, skillLevel };
 
-    fetch('http://localhost:3001/api/auth/signup', {
+    fetch(`${API_BASE_URL}/api/auth/signup`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
@@ -109,7 +110,7 @@ export default function Auth({ onAuthSuccess }) {
     e.preventDefault();
     setError('');
 
-    fetch('http://localhost:3001/api/auth/login', {
+    fetch(`${API_BASE_URL}/api/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password })
