@@ -220,6 +220,11 @@ function sendSmsOtp(phone, otpCode) {
 // Server-side memory store for active verification codes
 const activeOtps = {};
 
+// Root health status endpoint
+app.get('/', (req, res) => {
+  res.send('<h2>🚀 Jam Karo API Server is live and healthy!</h2><p>Exposing secure REST endpoints on Render.</p>');
+});
+
 // 1. Send OTP (Simulated or Real phone verification)
 app.post('/api/auth/send-otp', (req, res) => {
   const { phone, email } = req.body;
