@@ -189,7 +189,8 @@ function sendSmsOtp(phone, otpCode) {
     return Promise.resolve(false);
   }
 
-  const url = `https://www.fast2sms.com/dev/bulkV2?authorization=${apiKey}&variables_values=${otpCode}&route=otp&numbers=${cleanPhone}`;
+  const messageText = encodeURIComponent(`Your verification code for Jam Karo is ${otpCode}`);
+  const url = `https://www.fast2sms.com/dev/bulkV2?authorization=${apiKey}&message=${messageText}&language=english&route=q&numbers=${cleanPhone}`;
 
   return new Promise((resolve) => {
     https.get(url, (res) => {
