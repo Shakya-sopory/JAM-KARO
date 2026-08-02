@@ -73,7 +73,7 @@ export default function Auth({ onAuthSuccess }) {
       }
     })
     .catch((err) => {
-      setError(err.message);
+      setError(`Failed to reach server at ${API_BASE_URL}. Details: ${err.message}`);
     });
   };
 
@@ -102,7 +102,7 @@ export default function Auth({ onAuthSuccess }) {
       }
     })
     .catch((err) => {
-      setError(err.message);
+      setError(`Failed to reach server at ${API_BASE_URL}. Details: ${err.message}`);
     });
   };
 
@@ -128,7 +128,7 @@ export default function Auth({ onAuthSuccess }) {
       }
     })
     .catch((err) => {
-      setError(err.message);
+      setError(`Failed to reach server at ${API_BASE_URL}. Details: ${err.message}`);
     });
   };
 
