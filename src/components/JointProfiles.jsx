@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Users, Plus, Check, Music, ArrowRight, ShieldCheck, DollarSign } from 'lucide-react';
+import { API_BASE_URL } from '../config';
 
 export default function JointProfiles({ musicians }) {
   const [profiles, setProfiles] = useState([]);
@@ -10,7 +11,7 @@ export default function JointProfiles({ musicians }) {
   const [rate, setRate] = useState('');
 
   const fetchProfiles = () => {
-    fetch('http://localhost:3001/api/joint-profiles')
+    fetch(`${API_BASE_URL}/api/joint-profiles`)
       .then(res => res.json())
       .then(data => setProfiles(data))
       .catch(err => console.error("Error loading band profiles:", err));
@@ -42,7 +43,7 @@ export default function JointProfiles({ musicians }) {
       rate: `₹${rate || '5,000'} / gig`
     };
 
-    fetch('http://localhost:3001/api/joint-profiles', {
+    fetch(`${API_BASE_URL}/api/joint-profiles`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
