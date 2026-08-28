@@ -1,21 +1,34 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
-const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
 const fs = require('fs');
 const multer = require('multer');
 const https = require('https');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const { Pool } = require('pg');
 
 const app = express();
 app.set('trust proxy', 1);
-const PORT = 3001;
+const PORT = process.env.PORT || 3001;
 
 // JWT signing secret (override in server/.env for production)
 const JWT_SECRET = process.env.JWT_SECRET || 'jam-karo-dev-secret-change-me';
 const JWT_EXPIRES_IN = '7d';
+
+// --- Postgres (Neon) connection pool ---
+// Neon and most hosted Postgres require SSL. rejectUnauthorized:false keeps
+// this working on free tiers without shipping a CA cert.
+if (!process.env.DATABASE_URL) {
+  console.error('⚠️  DATABASE_URL is not set. Add your Neon connection string to server/.env');
+}
+// Enable SSL for hosted Postgres (Neon etc.); skip it for a local dev database.
+const isLocalDb = /@(localhost|127\.0\.0\.1)/.test(process.env.DATABASE_URL || '');
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: isLocalDb ? false : { rejectUnauthorized: false }
+});
 
 // Issue a signed JWT for an authenticated user
 function issueToken(user) {
@@ -68,142 +81,114 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage: storage });
 
-// SQLite Database Setup
-const dbPath = path.resolve(__dirname, 'database.db');
-const db = new sqlite3.Database(dbPath, (err) => {
-  if (err) {
-    console.error('Error opening SQLite database:', err.message);
-  } else {
-    console.log('Connected to SQLite database at:', dbPath);
-    initializeTables();
-  }
-});
+// --- Postgres schema bootstrap (no pre-seeded dummy data) ---
+// Type notes vs the old SQLite schema:
+//   - INTEGER PRIMARY KEY AUTOINCREMENT  ->  SERIAL PRIMARY KEY
+//   - TEXT stays TEXT (Postgres has a real TEXT type)
+//   - UNIQUE(a, b) inline table constraint syntax is identical
+//   - date/time columns stay TEXT: the app stores free-form strings
+//     like '8:00 PM', not real dates
+//   - joint_profiles.members / .genres stay TEXT holding JSON strings
+//     (code still does JSON.stringify / JSON.parse around them)
+//   - notifications.read_status stays INTEGER 0/1 (frontend compares === 0)
+async function initializeTables() {
+  const schema = `
+    CREATE TABLE IF NOT EXISTS users (
+      id SERIAL PRIMARY KEY,
+      email TEXT UNIQUE NOT NULL,
+      password TEXT NOT NULL,
+      phone TEXT,
+      user_type TEXT NOT NULL,        -- 'musician', 'hirer'
+      name TEXT,
+      neighborhood TEXT,
+      role TEXT,                      -- Instrument played or 'Vocalist'
+      skill_level TEXT,               -- 'Learning', 'Intermediate', 'Professional'
+      genres TEXT,                    -- Comma-separated genres
+      gear TEXT,
+      bio TEXT,
+      avatar TEXT,
+      video_url TEXT,                 -- Audition reel path
+      distance TEXT DEFAULT '1.2 km'
+    );
 
-// Create tables with no pre-seeded dummy profile data for a clean launch
-function initializeTables() {
-  db.serialize(() => {
-    // 1. USERS Table (Unified User & Profile table)
-    db.run(`
-      CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        email TEXT UNIQUE NOT NULL,
-        password TEXT NOT NULL,
-        phone TEXT,             
-        user_type TEXT NOT NULL, -- 'musician', 'hirer'
-        name TEXT,
-        neighborhood TEXT,
-        role TEXT,              -- Instrument played or 'Vocalist'
-        skill_level TEXT,       -- 'Learning', 'Intermediate', 'Professional'
-        genres TEXT,            -- Comma-separated genres
-        gear TEXT,
-        bio TEXT,
-        avatar TEXT,
-        video_url TEXT,         -- Audition reel path
-        distance TEXT DEFAULT '1.2 km'
-      )
-    `);
+    CREATE TABLE IF NOT EXISTS matches (
+      id SERIAL PRIMARY KEY,
+      requester_id INTEGER,
+      target_id INTEGER,
+      status TEXT,                    -- 'liked', 'skipped'
+      UNIQUE (requester_id, target_id)
+    );
 
-    // 2. MATCHES Table (Likes/Skips)
-    db.run(`
-      CREATE TABLE IF NOT EXISTS matches (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        requester_id INTEGER,
-        target_id INTEGER,
-        status TEXT, -- 'liked', 'skipped'
-        UNIQUE(requester_id, target_id)
-      )
-    `);
+    CREATE TABLE IF NOT EXISTS joint_profiles (
+      id SERIAL PRIMARY KEY,
+      band_name TEXT NOT NULL,
+      members TEXT NOT NULL,          -- JSON string of member array
+      genres TEXT NOT NULL,           -- JSON string of genres array
+      rate TEXT,
+      status TEXT,
+      jams_count INTEGER DEFAULT 1
+    );
 
-    // 3. JOINT PROFILES (Bands) Table
-    db.run(`
-      CREATE TABLE IF NOT EXISTS joint_profiles (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        band_name TEXT NOT NULL,
-        members TEXT NOT NULL, -- JSON string of member array
-        genres TEXT NOT NULL,  -- JSON string of genres array
-        rate TEXT,
-        status TEXT,
-        jams_count INTEGER DEFAULT 1
-      )
-    `);
+    CREATE TABLE IF NOT EXISTS gigs (
+      id SERIAL PRIMARY KEY,
+      venue TEXT NOT NULL,
+      event TEXT NOT NULL,
+      date TEXT NOT NULL,
+      time TEXT NOT NULL,
+      pay TEXT NOT NULL,
+      status TEXT NOT NULL,           -- 'Open', 'Confirmed', ...
+      contract_details TEXT,
+      hirer TEXT
+    );
 
-    // 4. GIGS (Marketplace Board) Table
-    db.run(`
-      CREATE TABLE IF NOT EXISTS gigs (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        venue TEXT NOT NULL,
-        event TEXT NOT NULL,
-        date TEXT NOT NULL,
-        time TEXT NOT NULL,
-        pay TEXT NOT NULL,
-        status TEXT NOT NULL, -- 'Open', 'In Escrow', 'Released'
-        contract_details TEXT,
-        hirer TEXT
-      )
-    `);
+    CREATE TABLE IF NOT EXISTS gear_rentals (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL,
+      price TEXT NOT NULL,
+      neighborhood TEXT NOT NULL,
+      contact TEXT NOT NULL,
+      status TEXT DEFAULT 'Available' -- 'Available', 'Rented'
+    );
 
-    // 5. GEAR RENTALS Table
-    db.run(`
-      CREATE TABLE IF NOT EXISTS gear_rentals (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL,
-        price TEXT NOT NULL,
-        neighborhood TEXT NOT NULL,
-        contact TEXT NOT NULL,
-        status TEXT DEFAULT 'Available' -- 'Available', 'Rented'
-      )
-    `);
+    CREATE TABLE IF NOT EXISTS community_messages (
+      id SERIAL PRIMARY KEY,
+      sender_name TEXT NOT NULL,
+      message TEXT NOT NULL,
+      user_role TEXT DEFAULT 'Learner',
+      timestamp TEXT NOT NULL
+    );
 
-    // 6. COMMUNITY MESSAGES Table (Learner's Space)
-    db.run(`
-      CREATE TABLE IF NOT EXISTS community_messages (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        sender_name TEXT NOT NULL,
-        message TEXT NOT NULL,
-        user_role TEXT DEFAULT 'Learner',
-        timestamp TEXT NOT NULL
-      )
-    `);
+    CREATE TABLE IF NOT EXISTS jam_sessions (
+      id SERIAL PRIMARY KEY,
+      cafe_name TEXT NOT NULL,
+      title TEXT NOT NULL,
+      date TEXT NOT NULL,
+      time TEXT NOT NULL,
+      entry_fee TEXT NOT NULL,
+      slots_total INTEGER NOT NULL,
+      slots_left INTEGER NOT NULL,
+      description TEXT
+    );
 
-    // 7. JAM SESSIONS Table (Cafe Jam Circles)
-    db.run(`
-      CREATE TABLE IF NOT EXISTS jam_sessions (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        cafe_name TEXT NOT NULL,
-        title TEXT NOT NULL,
-        date TEXT NOT NULL,
-        time TEXT NOT NULL,
-        entry_fee TEXT NOT NULL,
-        slots_total INTEGER NOT NULL,
-        slots_left INTEGER NOT NULL,
-        description TEXT
-      )
-    `);
+    CREATE TABLE IF NOT EXISTS private_messages (
+      id SERIAL PRIMARY KEY,
+      sender_id INTEGER NOT NULL,
+      receiver_id INTEGER NOT NULL,
+      message TEXT NOT NULL,
+      timestamp TEXT NOT NULL
+    );
 
-    // 8. PRIVATE MESSAGES Table (1-on-1 Chatbox)
-    db.run(`
-      CREATE TABLE IF NOT EXISTS private_messages (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        sender_id INTEGER NOT NULL,
-        receiver_id INTEGER NOT NULL,
-        message TEXT NOT NULL,
-        timestamp TEXT NOT NULL
-      )
-    `);
+    CREATE TABLE IF NOT EXISTS notifications (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL,
+      message TEXT NOT NULL,
+      read_status INTEGER DEFAULT 0,  -- 0 for Unread, 1 for Read
+      timestamp TEXT NOT NULL
+    );
+  `;
 
-    // 9. NOTIFICATIONS Table (Hub Alerts)
-    db.run(`
-      CREATE TABLE IF NOT EXISTS notifications (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER NOT NULL,
-        message TEXT NOT NULL,
-        read_status INTEGER DEFAULT 0, -- 0 for Unread, 1 for Read
-        timestamp TEXT NOT NULL
-      )
-    `);
-
-    console.log("SQLite tables initialized cleanly (no pre-seeded dummy profiles). ready for direct user signups!");
-  });
+  await pool.query(schema);
+  console.log('✅ Postgres tables ready (SERIAL ids, no seed data).');
 }
 
 // --- REST API ENDPOINTS ---
@@ -269,7 +254,7 @@ app.post('/api/auth/send-otp', (req, res) => {
 
   // Generate a random 4-digit OTP code
   const generatedOtp = Math.floor(1000 + Math.random() * 9000).toString();
-  
+
   // Clean phone digits for storage mapping
   const cleanPhone = phone.replace(/[^0-9]/g, '').slice(-10);
   activeOtps[cleanPhone] = generatedOtp;
@@ -282,20 +267,20 @@ app.post('/api/auth/send-otp', (req, res) => {
   console.log(`==========================================\n`);
 
   sendSmsOtp(phone, generatedOtp).then((realSmsSent) => {
-    res.json({ 
-      success: true, 
+    res.json({
+      success: true,
       // ONLY send the OTP to the client if a real SMS could NOT be dispatched (so it works as a fallback)
       otp: realSmsSent ? undefined : generatedOtp,
       realSmsSent,
-      message: realSmsSent 
-        ? "Verification code dispatched to your mobile!" 
-        : "OTP logged to server console (Fast2SMS API key missing)." 
+      message: realSmsSent
+        ? "Verification code dispatched to your mobile!"
+        : "OTP logged to server console (Fast2SMS API key missing)."
     });
   });
 });
 
 // 2. Authentication Signup (Detailed profile fields with backend verification check)
-app.post('/api/auth/signup', (req, res) => {
+app.post('/api/auth/signup', async (req, res) => {
   const { email, password, phone, otp, userType, name, neighborhood, role, skillLevel } = req.body;
   if (!email || !password || !phone || !otp || !userType) {
     return res.status(400).json({ error: "Missing email, password, phone, OTP code, or userType" });
@@ -317,93 +302,94 @@ app.post('/api/auth/signup', (req, res) => {
   // Hash the password before persisting (10 salt rounds)
   const hashedPassword = bcrypt.hashSync(password, 10);
 
-  db.run(
-    `INSERT INTO users (email, password, phone, user_type, name, neighborhood, role, skill_level, avatar, genres, gear, bio)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '', '', '')`,
-    [email, hashedPassword, phone, userType, name || 'User', neighborhood || 'College Road', role || 'Vocalist', skillLevel || 'Learning', avatar],
-    function(err) {
-      if (err) {
-        if (err.message.includes('UNIQUE constraint failed')) {
-          return res.status(400).json({ error: "Email already registered" });
-        }
-        return res.status(500).json({ error: err.message });
-      }
+  try {
+    // Postgres has no this.lastID -> ask for the new id back with RETURNING
+    const { rows } = await pool.query(
+      `INSERT INTO users (email, password, phone, user_type, name, neighborhood, role, skill_level, avatar, genres, gear, bio)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, '', '', '')
+       RETURNING id`,
+      [email, hashedPassword, phone, userType, name || 'User', neighborhood || 'College Road', role || 'Vocalist', skillLevel || 'Learning', avatar]
+    );
+    const newId = rows[0].id;
 
-      const userData = {
-        id: this.lastID,
-        email,
-        phone,
-        userType,
-        name: name || 'User',
-        neighborhood: neighborhood || 'College Road',
-        role: role || 'Vocalist',
-        skillLevel: skillLevel || 'Learning',
-        avatar,
-        genres: [],
-        gear: '',
-        bio: '',
-        success: true
-      };
+    const userData = {
+      id: newId,
+      email,
+      phone,
+      userType,
+      name: name || 'User',
+      neighborhood: neighborhood || 'College Road',
+      role: role || 'Vocalist',
+      skillLevel: skillLevel || 'Learning',
+      avatar,
+      genres: [],
+      gear: '',
+      bio: '',
+      success: true
+    };
 
-      const token = issueToken({ id: this.lastID, email, user_type: userType });
-      res.json({ token, ...userData });
+    const token = issueToken({ id: newId, email, user_type: userType });
+    res.json({ token, ...userData });
+  } catch (err) {
+    // Postgres unique-violation SQLSTATE is 23505 (was "UNIQUE constraint failed" text in SQLite)
+    if (err.code === '23505') {
+      return res.status(400).json({ error: "Email already registered" });
     }
-  );
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // 3. Authentication Login
-app.post('/api/auth/login', (req, res) => {
+app.post('/api/auth/login', async (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) {
     return res.status(400).json({ error: "Missing email or password" });
   }
 
-  db.get(
-    "SELECT * FROM users WHERE email = ?",
-    [email],
-    (err, user) => {
-      if (err) {
-        return res.status(500).json({ error: err.message });
-      }
-      if (!user || !bcrypt.compareSync(password, user.password)) {
-        return res.status(401).json({ error: "Invalid email or password" });
-      }
+  try {
+    const { rows } = await pool.query("SELECT * FROM users WHERE email = $1", [email]);
+    const user = rows[0];
 
-      const userData = {
-        id: user.id,
-        email: user.email,
-        phone: user.phone || '',
-        userType: user.user_type,
-        name: user.name,
-        neighborhood: user.neighborhood,
-        role: user.role,
-        skillLevel: user.skill_level,
-        genres: user.genres ? user.genres.split(',').map(g => g.trim()) : [],
-        gear: user.gear || '',
-        bio: user.bio || '',
-        avatar: user.avatar,
-        videoUrl: user.video_url || '',
-        success: true
-      };
-
-      const token = issueToken(user);
-      res.json({ token, ...userData });
+    if (!user || !bcrypt.compareSync(password, user.password)) {
+      return res.status(401).json({ error: "Invalid email or password" });
     }
-  );
+
+    const userData = {
+      id: user.id,
+      email: user.email,
+      phone: user.phone || '',
+      userType: user.user_type,
+      name: user.name,
+      neighborhood: user.neighborhood,
+      role: user.role,
+      skillLevel: user.skill_level,
+      genres: user.genres ? user.genres.split(',').map(g => g.trim()) : [],
+      gear: user.gear || '',
+      bio: user.bio || '',
+      avatar: user.avatar,
+      videoUrl: user.video_url || '',
+      success: true
+    };
+
+    const token = issueToken(user);
+    res.json({ token, ...userData });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // 4. Update User Profile (Supports Multi-part Form Data file uploads)
 app.post('/api/profiles/update', authenticateToken, upload.fields([
   { name: 'avatar', maxCount: 1 },
   { name: 'video', maxCount: 1 }
-]), (req, res) => {
+]), async (req, res) => {
   const { name, neighborhood, role, skillLevel, genres, gear, bio } = req.body;
   const userId = req.user.id;
 
   // Handle uploaded file URLs
   let avatarUrl = undefined;
   let videoUrl = undefined;
-  
+
   if (req.files) {
     const uploadsBase = `${req.protocol}://${req.get('host')}/uploads/`;
     if (req.files['avatar'] && req.files['avatar'][0]) {
@@ -416,69 +402,67 @@ app.post('/api/profiles/update', authenticateToken, upload.fields([
 
   const genreString = Array.isArray(genres) ? genres.join(', ') : genres || '';
 
-  // Construct query dynamically to preserve existing avatar/video files if no new file is uploaded
-  let query = `UPDATE users 
-               SET name = ?, neighborhood = ?, role = ?, skill_level = ?, genres = ?, gear = ?, bio = ?`;
-  let params = [name, neighborhood, role, skillLevel, genreString, gear, bio];
+  // Build the UPDATE dynamically so avatar/video are only overwritten when a
+  // new file is uploaded. Placeholders are numbered ($1, $2, ...) in order.
+  const columns = ['name', 'neighborhood', 'role', 'skill_level', 'genres', 'gear', 'bio'];
+  const values = [name, neighborhood, role, skillLevel, genreString, gear, bio];
 
   if (avatarUrl) {
-    query += `, avatar = ?`;
-    params.push(avatarUrl);
+    columns.push('avatar');
+    values.push(avatarUrl);
   }
   if (videoUrl) {
-    query += `, video_url = ?`;
-    params.push(videoUrl);
+    columns.push('video_url');
+    values.push(videoUrl);
   }
 
-  query += ` WHERE id = ?`;
-  params.push(userId);
+  const setClause = columns.map((col, i) => `${col} = $${i + 1}`).join(', ');
+  values.push(userId);
+  const query = `UPDATE users SET ${setClause} WHERE id = $${values.length}`;
 
-  db.run(query, params, function(err) {
-    if (err) {
-      return res.status(500).json({ error: err.message });
+  try {
+    await pool.query(query, values);
+
+    const { rows } = await pool.query("SELECT * FROM users WHERE id = $1", [userId]);
+    const user = rows[0];
+    if (!user) {
+      return res.status(404).json({ error: "User not found after update" });
     }
-    
-    // Retrieve and return updated details
-    db.get("SELECT * FROM users WHERE id = ?", [userId], (err, user) => {
-      if (user) {
-        res.json({
-          id: user.id,
-          email: user.email,
-          phone: user.phone || '',
-          userType: user.user_type,
-          name: user.name,
-          neighborhood: user.neighborhood,
-          role: user.role,
-          skillLevel: user.skill_level,
-          genres: user.genres ? user.genres.split(',').map(g => g.trim()) : [],
-          gear: user.gear || '',
-          bio: user.bio || '',
-          avatar: user.avatar,
-          videoUrl: user.video_url || '',
-          success: true
-        });
-      } else {
-        res.status(404).json({ error: "User not found after update" });
-      }
+
+    res.json({
+      id: user.id,
+      email: user.email,
+      phone: user.phone || '',
+      userType: user.user_type,
+      name: user.name,
+      neighborhood: user.neighborhood,
+      role: user.role,
+      skillLevel: user.skill_level,
+      genres: user.genres ? user.genres.split(',').map(g => g.trim()) : [],
+      gear: user.gear || '',
+      bio: user.bio || '',
+      avatar: user.avatar,
+      videoUrl: user.video_url || '',
+      success: true
     });
-  });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // 5. Get Musicians (returns other musician users supporting zone filtering)
-app.get('/api/musicians', (req, res) => {
+app.get('/api/musicians', async (req, res) => {
   const { zone } = req.query;
   let query = "SELECT * FROM users WHERE user_type = 'musician'";
-  let params = [];
+  const params = [];
 
   if (zone && zone !== 'All') {
-    query += " AND neighborhood = ?";
     params.push(zone);
+    query += ` AND neighborhood = $${params.length}`;
   }
 
-  db.all(query, params, (err, rows) => {
-    if (err) {
-      return res.status(500).json({ error: err.message });
-    }
+  try {
+    const { rows } = await pool.query(query, params);
     const formatted = rows.map(r => ({
       id: r.id,
       name: r.name,
@@ -493,11 +477,13 @@ app.get('/api/musicians', (req, res) => {
       distance: r.distance
     }));
     res.json(formatted);
-  });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // 6. Swipe Match Action
-app.post('/api/matches', authenticateToken, (req, res) => {
+app.post('/api/matches', authenticateToken, async (req, res) => {
   const { targetId, status } = req.body;
   const currentUserId = req.user.id;
 
@@ -505,56 +491,53 @@ app.post('/api/matches', authenticateToken, (req, res) => {
     return res.status(400).json({ error: "Missing swipe parameters" });
   }
 
-  db.run(
-    `INSERT INTO matches (requester_id, target_id, status) 
-     VALUES (?, ?, ?) 
-     ON CONFLICT(requester_id, target_id) DO UPDATE SET status = excluded.status`,
-    [currentUserId, targetId, status],
-    function(err) {
-      if (err) {
-        return res.status(500).json({ error: err.message });
-      }
+  try {
+    // Postgres upsert: same shape as SQLite, EXCLUDED refers to the row that
+    // failed to insert. The UNIQUE(requester_id, target_id) constraint is the target.
+    await pool.query(
+      `INSERT INTO matches (requester_id, target_id, status)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (requester_id, target_id) DO UPDATE SET status = EXCLUDED.status`,
+      [currentUserId, targetId, status]
+    );
 
-      if (status === 'liked') {
-        db.get("SELECT * FROM users WHERE id = ?", [targetId], (err, user) => {
-          if (user) {
-            // Auto match on likes for seed demonstration
-            return res.json({ matched: true, name: user.name });
-          }
-          res.json({ matched: false });
-        });
-      } else {
-        res.json({ matched: false });
+    if (status === 'liked') {
+      const { rows } = await pool.query("SELECT * FROM users WHERE id = $1", [targetId]);
+      if (rows[0]) {
+        return res.json({ matched: true, name: rows[0].name });
       }
+      return res.json({ matched: false });
     }
-  );
+
+    res.json({ matched: false });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // 7. Save/Fetch Joint Profiles (Bands Lineup)
-app.post('/api/joint-profiles', authenticateToken, (req, res) => {
+app.post('/api/joint-profiles', authenticateToken, async (req, res) => {
   const { bandName, members, genres, rate } = req.body;
   if (!bandName || !members || !genres) {
     return res.status(400).json({ error: "Missing band fields" });
   }
 
-  db.run(
-    `INSERT INTO joint_profiles (band_name, members, genres, rate, status) 
-     VALUES (?, ?, ?, ?, ?)`,
-    [bandName, JSON.stringify(members), JSON.stringify(genres), rate, 'Jamming/Vetting'],
-    function(err) {
-      if (err) {
-        return res.status(500).json({ error: err.message });
-      }
-      res.json({ id: this.lastID, success: true });
-    }
-  );
+  try {
+    const { rows } = await pool.query(
+      `INSERT INTO joint_profiles (band_name, members, genres, rate, status)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING id`,
+      [bandName, JSON.stringify(members), JSON.stringify(genres), rate, 'Jamming/Vetting']
+    );
+    res.json({ id: rows[0].id, success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-app.get('/api/joint-profiles', (req, res) => {
-  db.all("SELECT * FROM joint_profiles ORDER BY id DESC", [], (err, rows) => {
-    if (err) {
-      return res.status(500).json({ error: err.message });
-    }
+app.get('/api/joint-profiles', async (req, res) => {
+  try {
+    const { rows } = await pool.query("SELECT * FROM joint_profiles ORDER BY id DESC");
     const formatted = rows.map(r => ({
       id: r.id,
       bandName: r.band_name,
@@ -565,106 +548,104 @@ app.get('/api/joint-profiles', (req, res) => {
       jamsCount: r.jams_count
     }));
     res.json(formatted);
-  });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // 8. Shows Board (List & Create)
-app.get('/api/gigs', (req, res) => {
-  db.all("SELECT * FROM gigs ORDER BY id DESC", [], (err, rows) => {
-    if (err) {
-      return res.status(500).json({ error: err.message });
-    }
+app.get('/api/gigs', async (req, res) => {
+  try {
+    const { rows } = await pool.query("SELECT * FROM gigs ORDER BY id DESC");
     res.json(rows);
-  });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-app.post('/api/gigs', authenticateToken, (req, res) => {
+app.post('/api/gigs', authenticateToken, async (req, res) => {
   const { venue, event, date, time, pay, contractDetails, hirer } = req.body;
   if (!venue || !event || !pay) {
     return res.status(400).json({ error: "Missing required fields (venue, event, pay)" });
   }
 
-  db.run(
-    `INSERT INTO gigs (venue, event, date, time, pay, status, contract_details, hirer) 
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    [venue, event, date || '2026-07-20', time || '8:00 PM', `₹${pay}`, 'Open', contractDetails || 'PA sound provided by organizer.', hirer || 'Host/Cafe'],
-    function(err) {
-      if (err) {
-        return res.status(500).json({ error: err.message });
-      }
-      res.json({ id: this.lastID, success: true });
-    }
-  );
+  try {
+    const { rows } = await pool.query(
+      `INSERT INTO gigs (venue, event, date, time, pay, status, contract_details, hirer)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       RETURNING id`,
+      [venue, event, date || '2026-07-20', time || '8:00 PM', `₹${pay}`, 'Open', contractDetails || 'PA sound provided by organizer.', hirer || 'Host/Cafe']
+    );
+    res.json({ id: rows[0].id, success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-// 9. Booking Confirm (Triggers locked advance notification)
-app.post('/api/bookings', authenticateToken, (req, res) => {
+// 9. Booking Confirm (Triggers confirmation notification)
+app.post('/api/bookings', authenticateToken, async (req, res) => {
   const { gigId } = req.body;
   if (!gigId) {
     return res.status(400).json({ error: "Missing gigId" });
   }
 
-  db.run("UPDATE gigs SET status = 'Confirmed' WHERE id = ?", [gigId], function(err) {
-    if (err) {
-      return res.status(500).json({ error: err.message });
-    }
+  try {
+    await pool.query("UPDATE gigs SET status = 'Confirmed' WHERE id = $1", [gigId]);
 
     const nowStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    const targetUserId = req.user.id;
-    db.run(
-      "INSERT INTO notifications (user_id, message, timestamp) VALUES (?, ?, ?)",
-      [targetUserId, `Show Booking Confirmed! Please coordinate directly with the venue/musician for the advance.`, nowStr],
-      () => {
-        res.json({ success: true });
-      }
+    await pool.query(
+      "INSERT INTO notifications (user_id, message, timestamp) VALUES ($1, $2, $3)",
+      [req.user.id, `Show Booking Confirmed! Please coordinate directly with the venue/musician for the advance.`, nowStr]
     );
-  });
+
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // 10. Gear Rentals (List & Book)
-app.get('/api/rentals', (req, res) => {
-  db.all("SELECT * FROM gear_rentals", [], (err, rows) => {
-    if (err) {
-      return res.status(500).json({ error: err.message });
-    }
+app.get('/api/rentals', async (req, res) => {
+  try {
+    const { rows } = await pool.query("SELECT * FROM gear_rentals");
     res.json(rows);
-  });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-app.post('/api/rentals/book', authenticateToken, (req, res) => {
+app.post('/api/rentals/book', authenticateToken, async (req, res) => {
   const { itemId } = req.body;
   if (!itemId) {
     return res.status(400).json({ error: "Missing itemId" });
   }
 
-  db.run("UPDATE gear_rentals SET status = 'Rented' WHERE id = ?", [itemId], function(err) {
-    if (err) {
-      return res.status(500).json({ error: err.message });
-    }
+  try {
+    await pool.query("UPDATE gear_rentals SET status = 'Rented' WHERE id = $1", [itemId]);
 
     const nowStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    const targetUserId = req.user.id;
-    db.run(
-      "INSERT INTO notifications (user_id, message, timestamp) VALUES (?, ?, ?)",
-      [targetUserId, `Gear Rental Secured: Pick up scheduled.`, nowStr],
-      () => {
-        res.json({ success: true, bookedItemId: itemId });
-      }
+    await pool.query(
+      "INSERT INTO notifications (user_id, message, timestamp) VALUES ($1, $2, $3)",
+      [req.user.id, `Gear Rental Secured: Pick up scheduled.`, nowStr]
     );
-  });
+
+    res.json({ success: true, bookedItemId: itemId });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // 11. Community Learner's Chatroom API
-app.get('/api/community/messages', (req, res) => {
-  db.all("SELECT * FROM community_messages ORDER BY id ASC LIMIT 50", [], (err, rows) => {
-    if (err) {
-      return res.status(500).json({ error: err.message });
-    }
+app.get('/api/community/messages', async (req, res) => {
+  try {
+    const { rows } = await pool.query("SELECT * FROM community_messages ORDER BY id ASC LIMIT 50");
     res.json(rows);
-  });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-app.post('/api/community/messages', authenticateToken, (req, res) => {
+app.post('/api/community/messages', authenticateToken, async (req, res) => {
   const { senderName, message, userRole } = req.body;
   if (!senderName || !message) {
     return res.status(400).json({ error: "Missing senderName or message" });
@@ -672,97 +653,92 @@ app.post('/api/community/messages', authenticateToken, (req, res) => {
 
   const nowStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
-  db.run(
-    "INSERT INTO community_messages (sender_name, message, user_role, timestamp) VALUES (?, ?, ?, ?)",
-    [senderName, message, userRole || 'Learner', nowStr],
-    function(err) {
-      if (err) {
-        return res.status(500).json({ error: err.message });
-      }
-      res.json({ id: this.lastID, success: true, timestamp: nowStr });
-    }
-  );
+  try {
+    const { rows } = await pool.query(
+      "INSERT INTO community_messages (sender_name, message, user_role, timestamp) VALUES ($1, $2, $3, $4) RETURNING id",
+      [senderName, message, userRole || 'Learner', nowStr]
+    );
+    res.json({ id: rows[0].id, success: true, timestamp: nowStr });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // 12. Jam Circles API (List, Create, RSVP)
-app.get('/api/jams', (req, res) => {
-  db.all("SELECT * FROM jam_sessions ORDER BY id DESC", [], (err, rows) => {
-    if (err) {
-      return res.status(500).json({ error: err.message });
-    }
+app.get('/api/jams', async (req, res) => {
+  try {
+    const { rows } = await pool.query("SELECT * FROM jam_sessions ORDER BY id DESC");
     res.json(rows);
-  });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-app.post('/api/jams', authenticateToken, (req, res) => {
+app.post('/api/jams', authenticateToken, async (req, res) => {
   const { cafeName, title, date, time, entryFee, slotsTotal, description } = req.body;
   if (!cafeName || !title || !entryFee || !slotsTotal) {
     return res.status(400).json({ error: "Missing required fields (cafeName, title, entryFee, slotsTotal)" });
   }
 
-  db.run(
-    `INSERT INTO jam_sessions (cafe_name, title, date, time, entry_fee, slots_total, slots_left, description) 
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    [cafeName, title, date || '2026-07-20', time || '6:00 PM', `₹${entryFee} (Cover Charge)`, slotsTotal, slotsTotal, description || 'A casual open jam circle.'],
-    function(err) {
-      if (err) {
-        return res.status(500).json({ error: err.message });
-      }
-      res.json({ id: this.lastID, success: true });
-    }
-  );
+  try {
+    const { rows } = await pool.query(
+      `INSERT INTO jam_sessions (cafe_name, title, date, time, entry_fee, slots_total, slots_left, description)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       RETURNING id`,
+      [cafeName, title, date || '2026-07-20', time || '6:00 PM', `₹${entryFee} (Cover Charge)`, slotsTotal, slotsTotal, description || 'A casual open jam circle.']
+    );
+    res.json({ id: rows[0].id, success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-app.post('/api/jams/rsvp', authenticateToken, (req, res) => {
+app.post('/api/jams/rsvp', authenticateToken, async (req, res) => {
   const { jamId } = req.body;
   if (!jamId) {
     return res.status(400).json({ error: "Missing jamId" });
   }
 
-  db.run(
-    "UPDATE jam_sessions SET slots_left = slots_left - 1 WHERE id = ? AND slots_left > 0",
-    [jamId],
-    function(err) {
-      if (err) {
-        return res.status(500).json({ error: err.message });
-      }
+  try {
+    await pool.query(
+      "UPDATE jam_sessions SET slots_left = slots_left - 1 WHERE id = $1 AND slots_left > 0",
+      [jamId]
+    );
 
-      const nowStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-      const targetUserId = req.user.id;
-      db.run(
-        "INSERT INTO notifications (user_id, message, timestamp) VALUES (?, ?, ?)",
-        [targetUserId, `RSVP Confirmed: You booked a slot for Jam Circle! 🎙️`, nowStr],
-        () => {
-          res.json({ success: true });
-        }
-      );
-    }
-  );
+    const nowStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    await pool.query(
+      "INSERT INTO notifications (user_id, message, timestamp) VALUES ($1, $2, $3)",
+      [req.user.id, `RSVP Confirmed: You booked a slot for Jam Circle! 🎙️`, nowStr]
+    );
+
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // 13. 1-on-1 Private Messages API
-app.get('/api/messages/history', authenticateToken, (req, res) => {
+app.get('/api/messages/history', authenticateToken, async (req, res) => {
   const { receiver } = req.query;
   const sender = req.user.id;
   if (!receiver) {
     return res.status(400).json({ error: "Missing receiver parameter" });
   }
 
-  db.all(
-    `SELECT * FROM private_messages 
-     WHERE (sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?) 
-     ORDER BY id ASC`,
-    [sender, receiver, receiver, sender],
-    (err, rows) => {
-      if (err) {
-        return res.status(500).json({ error: err.message });
-      }
-      res.json(rows);
-    }
-  );
+  try {
+    const { rows } = await pool.query(
+      `SELECT * FROM private_messages
+       WHERE (sender_id = $1 AND receiver_id = $2) OR (sender_id = $3 AND receiver_id = $4)
+       ORDER BY id ASC`,
+      [sender, receiver, receiver, sender]
+    );
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-app.post('/api/messages/send', authenticateToken, (req, res) => {
+app.post('/api/messages/send', authenticateToken, async (req, res) => {
   const { receiverId, message } = req.body;
   const senderId = req.user.id;
   if (!receiverId || !message) {
@@ -771,51 +747,52 @@ app.post('/api/messages/send', authenticateToken, (req, res) => {
 
   const nowStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
-  db.run(
-    "INSERT INTO private_messages (sender_id, receiver_id, message, timestamp) VALUES (?, ?, ?, ?)",
-    [senderId, receiverId, message, nowStr],
-    function(err) {
-      if (err) {
-        return res.status(500).json({ error: err.message });
-      }
-      res.json({ id: this.lastID, success: true, timestamp: nowStr });
-    }
-  );
+  try {
+    const { rows } = await pool.query(
+      "INSERT INTO private_messages (sender_id, receiver_id, message, timestamp) VALUES ($1, $2, $3, $4) RETURNING id",
+      [senderId, receiverId, message, nowStr]
+    );
+    res.json({ id: rows[0].id, success: true, timestamp: nowStr });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // 14. Notifications API
-app.get('/api/notifications', authenticateToken, (req, res) => {
+app.get('/api/notifications', authenticateToken, async (req, res) => {
   const userId = req.user.id;
 
-  db.all(
-    "SELECT * FROM notifications WHERE user_id = ? ORDER BY id DESC LIMIT 20",
-    [userId],
-    (err, rows) => {
-      if (err) {
-        return res.status(500).json({ error: err.message });
-      }
-      res.json(rows);
-    }
-  );
+  try {
+    const { rows } = await pool.query(
+      "SELECT * FROM notifications WHERE user_id = $1 ORDER BY id DESC LIMIT 20",
+      [userId]
+    );
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-app.post('/api/notifications/read', authenticateToken, (req, res) => {
+app.post('/api/notifications/read', authenticateToken, async (req, res) => {
   const userId = req.user.id;
 
-  db.run(
-    "UPDATE notifications SET read_status = 1 WHERE user_id = ?",
-    [userId],
-    function(err) {
-      if (err) {
-        return res.status(500).json({ error: err.message });
-      }
-      res.json({ success: true });
-    }
-  );
+  try {
+    await pool.query("UPDATE notifications SET read_status = 1 WHERE user_id = $1", [userId]);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-// Start Server
-app.listen(PORT, () => {
-  console.log(`\n🚀 Jam-to-Gig Dual API Server listening on: http://localhost:${PORT}`);
-  console.log(`Database File: ${dbPath}\n`);
-});
+// Start Server (only after the schema is ready)
+initializeTables()
+  .then(() => {
+    app.listen(PORT, () => {
+      console.log(`\n🚀 Jam Karo API listening on: http://localhost:${PORT}`);
+      console.log(`🗄️  Postgres: ${process.env.DATABASE_URL ? 'connected via DATABASE_URL' : 'NOT CONFIGURED'}\n`);
+    });
+  })
+  .catch((err) => {
+    console.error('❌ Failed to initialize the database:', err.message);
+    process.exit(1);
+  });
