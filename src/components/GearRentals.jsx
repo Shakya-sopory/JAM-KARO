@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { ShieldCheck, Phone, ShoppingCart, Info, Sparkles } from 'lucide-react';
 import { API_BASE_URL } from '../config';
 
-export default function GearRentals() {
+export default function GearRentals({ token }) {
   const [rentals, setRentals] = useState([]);
   const [successBooking, setSuccessBooking] = useState(null); // booked item ID or null
 
@@ -20,7 +20,10 @@ export default function GearRentals() {
   const handleBookRental = (itemId) => {
     fetch(`${API_BASE_URL}/api/rentals/book`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`
+      },
       body: JSON.stringify({ itemId })
     })
     .then(res => res.json())

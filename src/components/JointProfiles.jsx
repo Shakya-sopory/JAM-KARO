@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Users, Plus, Check, Music, ArrowRight, ShieldCheck, DollarSign } from 'lucide-react';
 import { API_BASE_URL } from '../config';
 
-export default function JointProfiles({ musicians }) {
+export default function JointProfiles({ musicians, token }) {
   const [profiles, setProfiles] = useState([]);
   const [isCreating, setIsCreating] = useState(false);
   const [bandName, setBandName] = useState('');
@@ -45,7 +45,10 @@ export default function JointProfiles({ musicians }) {
 
     fetch(`${API_BASE_URL}/api/joint-profiles`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`
+      },
       body: JSON.stringify(payload)
     })
     .then(res => res.json())

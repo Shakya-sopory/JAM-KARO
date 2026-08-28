@@ -2,14 +2,16 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Send, X, MessageSquare, Sparkles } from 'lucide-react';
 import { API_BASE_URL } from '../config';
 
-export default function PrivateChat({ currentUser, chatPartner, onClose }) {
+export default function PrivateChat({ currentUser, token, chatPartner, onClose }) {
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState('');
   const chatEndRef = useRef(null);
 
   const fetchChatHistory = () => {
     if (!currentUser || !chatPartner) return;
-    fetch(`${API_BASE_URL}/api/messages/history?sender=${currentUser.id}&receiver=${chatPartner.id}`)
+    fetch(`${API_BASE_URL}/api/messages/history?sender=${currentUser.id}&receiver=${chatPartner.id}`, {
+      headers: { Authorization: `Bearer ${token}` }
+    })
       .then(res => res.json())
       .then(data => setMessages(data))
       .catch(err => console.error("Error fetching private chat:", err));
@@ -38,7 +40,10 @@ export default function PrivateChat({ currentUser, chatPartner, onClose }) {
 
     fetch(`${API_BASE_URL}/api/messages/send`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`
+      },
       body: JSON.stringify(payload)
     })
     .then(res => res.json())

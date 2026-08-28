@@ -3,7 +3,7 @@ import { Calendar, HandCoins, CheckCircle, ArrowRight, ShieldAlert, Award, Music
 import UpiCheckout from './UpiCheckout';
 import { API_BASE_URL } from '../config';
 
-export default function Marketplace() {
+export default function Marketplace({ token }) {
   const [gigs, setGigs] = useState([]);
   const [jams, setJams] = useState([]);
   const [activeTab, setActiveTab] = useState('explore'); // 'explore' (shows) | 'jam-circles' | 'my-bookings' (confirmed)
@@ -57,7 +57,10 @@ export default function Marketplace() {
   const handleConfirmBooking = (gigId) => {
     fetch(`${API_BASE_URL}/api/bookings`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`
+      },
       body: JSON.stringify({ gigId })
     })
     .then(res => res.json())
@@ -73,8 +76,11 @@ export default function Marketplace() {
   const handleRsvpJam = (jamId) => {
     fetch(`${API_BASE_URL}/api/jams/rsvp`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ jamId, userId: 3 })
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`
+      },
+      body: JSON.stringify({ jamId })
     })
     .then(res => res.json())
     .then(() => {

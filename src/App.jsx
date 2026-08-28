@@ -131,7 +131,7 @@ export default function App() {
   const renderRoleContent = () => {
     // 1. Edit Profile View (Universal)
     if (activeTab === 'edit-profile') {
-      return <EditProfile user={user} onProfileUpdated={handleProfileUpdated} />;
+      return <EditProfile user={user} token={token} onProfileUpdated={handleProfileUpdated} />;
     }
 
     if (loading && user?.userType === 'musician') {
@@ -147,29 +147,29 @@ export default function App() {
       // MUSICIAN PROFILE FLOW
       switch (activeTab) {
         case 'discover':
-          return <Discover musicians={musicians} onOpenChat={handleOpenChat} />;
+          return <Discover musicians={musicians} token={token} onOpenChat={handleOpenChat} />;
         case 'chat':
-          return <CommunityChat user={user} />;
+          return <CommunityChat user={user} token={token} />;
         case 'gigs':
-          return <Marketplace />;
+          return <Marketplace token={token} />;
         case 'gear':
-          return <GearRentals />;
+          return <GearRentals token={token} />;
         default:
-          return <Discover musicians={musicians} onOpenChat={handleOpenChat} />;
+          return <Discover musicians={musicians} token={token} onOpenChat={handleOpenChat} />;
       }
     } else {
       // HIRER PROFILE FLOW (Cafe, Event Organizer, House Party Host)
       switch (activeTab) {
         case 'bands':
-          return <JointProfiles musicians={musicians} />;
+          return <JointProfiles musicians={musicians} token={token} />;
         case 'post-gig':
-          return <PostGig />;
+          return <PostGig token={token} />;
         case 'escrows':
-          return <Marketplace />;
+          return <Marketplace token={token} />;
         case 'gear':
-          return <GearRentals />;
+          return <GearRentals token={token} />;
         default:
-          return <JointProfiles musicians={musicians} />;
+          return <JointProfiles musicians={musicians} token={token} />;
       }
     }
   };
@@ -368,10 +368,11 @@ export default function App() {
 
       {/* 1-on-1 Collab Private Chat overlay */}
       {chatPartner && (
-        <PrivateChat 
-          currentUser={user} 
-          chatPartner={chatPartner} 
-          onClose={() => setChatPartner(null)} 
+        <PrivateChat
+          currentUser={user}
+          token={token}
+          chatPartner={chatPartner}
+          onClose={() => setChatPartner(null)}
         />
       )}
     </div>

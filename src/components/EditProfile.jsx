@@ -29,7 +29,7 @@ const INSTRUMENTS_LIST = [
   "Vocalist"
 ];
 
-export default function EditProfile({ user, onProfileUpdated }) {
+export default function EditProfile({ user, token, onProfileUpdated }) {
   const [name, setName] = useState(user.name || '');
   const [neighborhood, setNeighborhood] = useState(user.neighborhood || 'College Road');
   const [role, setRole] = useState(user.role || 'Vocalist');
@@ -101,7 +101,8 @@ export default function EditProfile({ user, onProfileUpdated }) {
 
     fetch(`${API_BASE_URL}/api/profiles/update`, {
       method: 'POST',
-      body: formData // Let the browser set multi-part boundary headers automatically
+      headers: { Authorization: `Bearer ${token}` }, // no Content-Type: browser sets the multipart boundary
+      body: formData
     })
     .then(res => res.json())
     .then(data => {

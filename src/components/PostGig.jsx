@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Calendar, DollarSign, MapPin, Sparkles, ArrowRight, ShieldCheck, Music, Users } from 'lucide-react';
 import { API_BASE_URL } from '../config';
 
-export default function PostGig({ onGigPosted }) {
+export default function PostGig({ token, onGigPosted }) {
   const [eventType, setEventType] = useState('gig'); // 'gig' (paid) | 'jam' (casual circle)
   
   // Universal fields
@@ -41,7 +41,10 @@ export default function PostGig({ onGigPosted }) {
 
       fetch(`${API_BASE_URL}/api/gigs`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
         body: JSON.stringify(payload)
       })
       .then(res => res.json())
@@ -68,7 +71,10 @@ export default function PostGig({ onGigPosted }) {
 
       fetch(`${API_BASE_URL}/api/jams`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
         body: JSON.stringify(payload)
       })
       .then(res => res.json())

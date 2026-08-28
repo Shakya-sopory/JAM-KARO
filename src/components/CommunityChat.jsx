@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Send, MessageSquare, Award, Sparkles, BookOpen } from 'lucide-react';
 import { API_BASE_URL } from '../config';
 
-export default function CommunityChat({ user }) {
+export default function CommunityChat({ user, token }) {
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState('');
   const chatEndRef = useRef(null);
@@ -38,7 +38,10 @@ export default function CommunityChat({ user }) {
 
     fetch(`${API_BASE_URL}/api/community/messages`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`
+      },
       body: JSON.stringify(payload)
     })
     .then(res => res.json())
