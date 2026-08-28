@@ -6,9 +6,43 @@ const path = require('path');
 const fs = require('fs');
 const multer = require('multer');
 const https = require('https');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
 
 const app = express();
+app.set('trust proxy', 1);
 const PORT = 3001;
+
+// JWT signing secret (override in server/.env for production)
+const JWT_SECRET = process.env.JWT_SECRET || 'jam-karo-dev-secret-change-me';
+const JWT_EXPIRES_IN = '7d';
+
+// Issue a signed JWT for an authenticated user
+function issueToken(user) {
+  return jwt.sign(
+    { id: user.id, email: user.email, userType: user.user_type || user.userType },
+    JWT_SECRET,
+    { expiresIn: JWT_EXPIRES_IN }
+  );
+}
+
+// Middleware: require a valid Bearer JWT and attach the decoded payload to req.user
+function authenticateToken(req, res, next) {
+  const authHeader = req.headers['authorization'] || '';
+  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
+
+  if (!token) {
+    return res.status(401).json({ error: "Missing or malformed Authorization header" });
+  }
+
+  jwt.verify(token, JWT_SECRET, (err, decoded) => {
+    if (err) {
+      return res.status(403).json({ error: "Invalid or expired token" });
+    }
+    req.user = decoded; // { id, email, userType, iat, exp }
+    next();
+  });
+}
 
 // Middleware
 app.use(cors());
@@ -280,10 +314,13 @@ app.post('/api/auth/signup', (req, res) => {
   // default initial avatar placeholder
   const avatar = `https://api.dicebear.com/7.x/avataaars/svg?seed=${name || email}`;
 
+  // Hash the password before persisting (10 salt rounds)
+  const hashedPassword = bcrypt.hashSync(password, 10);
+
   db.run(
-    `INSERT INTO users (email, password, phone, user_type, name, neighborhood, role, skill_level, avatar, genres, gear, bio) 
+    `INSERT INTO users (email, password, phone, user_type, name, neighborhood, role, skill_level, avatar, genres, gear, bio)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '', '', '')`,
-    [email, password, phone, userType, name || 'User', neighborhood || 'College Road', role || 'Vocalist', skillLevel || 'Learning', avatar],
+    [email, hashedPassword, phone, userType, name || 'User', neighborhood || 'College Road', role || 'Vocalist', skillLevel || 'Learning', avatar],
     function(err) {
       if (err) {
         if (err.message.includes('UNIQUE constraint failed')) {
@@ -291,21 +328,25 @@ app.post('/api/auth/signup', (req, res) => {
         }
         return res.status(500).json({ error: err.message });
       }
-      res.json({ 
-        id: this.lastID, 
-        email, 
+
+      const userData = {
+        id: this.lastID,
+        email,
         phone,
-        userType, 
-        name: name || 'User', 
-        neighborhood: neighborhood || 'College Road', 
-        role: role || 'Vocalist', 
+        userType,
+        name: name || 'User',
+        neighborhood: neighborhood || 'College Road',
+        role: role || 'Vocalist',
         skillLevel: skillLevel || 'Learning',
         avatar,
         genres: [],
         gear: '',
         bio: '',
-        success: true 
-      });
+        success: true
+      };
+
+      const token = issueToken({ id: this.lastID, email, user_type: userType });
+      res.json({ token, ...userData });
     }
   );
 });
@@ -318,20 +359,21 @@ app.post('/api/auth/login', (req, res) => {
   }
 
   db.get(
-    "SELECT * FROM users WHERE email = ? AND password = ?",
-    [email, password],
+    "SELECT * FROM users WHERE email = ?",
+    [email],
     (err, user) => {
       if (err) {
         return res.status(500).json({ error: err.message });
       }
-      if (!user) {
+      if (!user || !bcrypt.compareSync(password, user.password)) {
         return res.status(401).json({ error: "Invalid email or password" });
       }
-      res.json({ 
-        id: user.id, 
-        email: user.email, 
+
+      const userData = {
+        id: user.id,
+        email: user.email,
         phone: user.phone || '',
-        userType: user.user_type, 
+        userType: user.user_type,
         name: user.name,
         neighborhood: user.neighborhood,
         role: user.role,
@@ -341,32 +383,34 @@ app.post('/api/auth/login', (req, res) => {
         bio: user.bio || '',
         avatar: user.avatar,
         videoUrl: user.video_url || '',
-        success: true 
-      });
+        success: true
+      };
+
+      const token = issueToken(user);
+      res.json({ token, ...userData });
     }
   );
 });
 
 // 4. Update User Profile (Supports Multi-part Form Data file uploads)
-app.post('/api/profiles/update', upload.fields([
+app.post('/api/profiles/update', authenticateToken, upload.fields([
   { name: 'avatar', maxCount: 1 },
   { name: 'video', maxCount: 1 }
 ]), (req, res) => {
-  const { userId, name, neighborhood, role, skillLevel, genres, gear, bio } = req.body;
-  if (!userId) {
-    return res.status(400).json({ error: "Missing userId" });
-  }
+  const { name, neighborhood, role, skillLevel, genres, gear, bio } = req.body;
+  const userId = req.user.id;
 
   // Handle uploaded file URLs
   let avatarUrl = undefined;
   let videoUrl = undefined;
   
   if (req.files) {
+    const uploadsBase = `${req.protocol}://${req.get('host')}/uploads/`;
     if (req.files['avatar'] && req.files['avatar'][0]) {
-      avatarUrl = `http://localhost:3001/uploads/${req.files['avatar'][0].filename}`;
+      avatarUrl = `${uploadsBase}${req.files['avatar'][0].filename}`;
     }
     if (req.files['video'] && req.files['video'][0]) {
-      videoUrl = `http://localhost:3001/uploads/${req.files['video'][0].filename}`;
+      videoUrl = `${uploadsBase}${req.files['video'][0].filename}`;
     }
   }
 
@@ -453,9 +497,9 @@ app.get('/api/musicians', (req, res) => {
 });
 
 // 6. Swipe Match Action
-app.post('/api/matches', (req, res) => {
+app.post('/api/matches', authenticateToken, (req, res) => {
   const { targetId, status } = req.body;
-  const currentUserId = 99; // Mock user reference
+  const currentUserId = req.user.id;
 
   if (!targetId || !status) {
     return res.status(400).json({ error: "Missing swipe parameters" });
@@ -487,7 +531,7 @@ app.post('/api/matches', (req, res) => {
 });
 
 // 7. Save/Fetch Joint Profiles (Bands Lineup)
-app.post('/api/joint-profiles', (req, res) => {
+app.post('/api/joint-profiles', authenticateToken, (req, res) => {
   const { bandName, members, genres, rate } = req.body;
   if (!bandName || !members || !genres) {
     return res.status(400).json({ error: "Missing band fields" });
@@ -534,7 +578,7 @@ app.get('/api/gigs', (req, res) => {
   });
 });
 
-app.post('/api/gigs', (req, res) => {
+app.post('/api/gigs', authenticateToken, (req, res) => {
   const { venue, event, date, time, pay, contractDetails, hirer } = req.body;
   if (!venue || !event || !pay) {
     return res.status(400).json({ error: "Missing required fields (venue, event, pay)" });
@@ -554,22 +598,22 @@ app.post('/api/gigs', (req, res) => {
 });
 
 // 9. Booking Confirm (Triggers locked advance notification)
-app.post('/api/bookings', (req, res) => {
-  const { gigId, bandLeaderId } = req.body;
+app.post('/api/bookings', authenticateToken, (req, res) => {
+  const { gigId } = req.body;
   if (!gigId) {
     return res.status(400).json({ error: "Missing gigId" });
   }
 
-  db.run("UPDATE gigs SET status = 'In Escrow' WHERE id = ?", [gigId], function(err) {
+  db.run("UPDATE gigs SET status = 'Confirmed' WHERE id = ?", [gigId], function(err) {
     if (err) {
       return res.status(500).json({ error: err.message });
     }
 
     const nowStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    const targetUserId = bandLeaderId || 3;
+    const targetUserId = req.user.id;
     db.run(
       "INSERT INTO notifications (user_id, message, timestamp) VALUES (?, ?, ?)",
-      [targetUserId, `Show Advance Locked! Cafe Bliss locked payment for your show booking. 🔒`, nowStr],
+      [targetUserId, `Show Booking Confirmed! Please coordinate directly with the venue/musician for the advance.`, nowStr],
       () => {
         res.json({ success: true });
       }
@@ -587,8 +631,8 @@ app.get('/api/rentals', (req, res) => {
   });
 });
 
-app.post('/api/rentals/book', (req, res) => {
-  const { itemId, userId } = req.body;
+app.post('/api/rentals/book', authenticateToken, (req, res) => {
+  const { itemId } = req.body;
   if (!itemId) {
     return res.status(400).json({ error: "Missing itemId" });
   }
@@ -597,9 +641,9 @@ app.post('/api/rentals/book', (req, res) => {
     if (err) {
       return res.status(500).json({ error: err.message });
     }
-    
+
     const nowStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    const targetUserId = userId || 3;
+    const targetUserId = req.user.id;
     db.run(
       "INSERT INTO notifications (user_id, message, timestamp) VALUES (?, ?, ?)",
       [targetUserId, `Gear Rental Secured: Pick up scheduled.`, nowStr],
@@ -620,7 +664,7 @@ app.get('/api/community/messages', (req, res) => {
   });
 });
 
-app.post('/api/community/messages', (req, res) => {
+app.post('/api/community/messages', authenticateToken, (req, res) => {
   const { senderName, message, userRole } = req.body;
   if (!senderName || !message) {
     return res.status(400).json({ error: "Missing senderName or message" });
@@ -650,7 +694,7 @@ app.get('/api/jams', (req, res) => {
   });
 });
 
-app.post('/api/jams', (req, res) => {
+app.post('/api/jams', authenticateToken, (req, res) => {
   const { cafeName, title, date, time, entryFee, slotsTotal, description } = req.body;
   if (!cafeName || !title || !entryFee || !slotsTotal) {
     return res.status(400).json({ error: "Missing required fields (cafeName, title, entryFee, slotsTotal)" });
@@ -669,8 +713,8 @@ app.post('/api/jams', (req, res) => {
   );
 });
 
-app.post('/api/jams/rsvp', (req, res) => {
-  const { jamId, userId } = req.body;
+app.post('/api/jams/rsvp', authenticateToken, (req, res) => {
+  const { jamId } = req.body;
   if (!jamId) {
     return res.status(400).json({ error: "Missing jamId" });
   }
@@ -682,9 +726,9 @@ app.post('/api/jams/rsvp', (req, res) => {
       if (err) {
         return res.status(500).json({ error: err.message });
       }
-      
+
       const nowStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-      const targetUserId = userId || 3;
+      const targetUserId = req.user.id;
       db.run(
         "INSERT INTO notifications (user_id, message, timestamp) VALUES (?, ?, ?)",
         [targetUserId, `RSVP Confirmed: You booked a slot for Jam Circle! 🎙️`, nowStr],
@@ -697,10 +741,11 @@ app.post('/api/jams/rsvp', (req, res) => {
 });
 
 // 13. 1-on-1 Private Messages API
-app.get('/api/messages/history', (req, res) => {
-  const { sender, receiver } = req.query;
-  if (!sender || !receiver) {
-    return res.status(400).json({ error: "Missing sender or receiver parameters" });
+app.get('/api/messages/history', authenticateToken, (req, res) => {
+  const { receiver } = req.query;
+  const sender = req.user.id;
+  if (!receiver) {
+    return res.status(400).json({ error: "Missing receiver parameter" });
   }
 
   db.all(
@@ -717,9 +762,10 @@ app.get('/api/messages/history', (req, res) => {
   );
 });
 
-app.post('/api/messages/send', (req, res) => {
-  const { senderId, receiverId, message } = req.body;
-  if (!senderId || !receiverId || !message) {
+app.post('/api/messages/send', authenticateToken, (req, res) => {
+  const { receiverId, message } = req.body;
+  const senderId = req.user.id;
+  if (!receiverId || !message) {
     return res.status(400).json({ error: "Missing message parameters" });
   }
 
@@ -738,11 +784,8 @@ app.post('/api/messages/send', (req, res) => {
 });
 
 // 14. Notifications API
-app.get('/api/notifications', (req, res) => {
-  const { userId } = req.query;
-  if (!userId) {
-    return res.status(400).json({ error: "Missing userId" });
-  }
+app.get('/api/notifications', authenticateToken, (req, res) => {
+  const userId = req.user.id;
 
   db.all(
     "SELECT * FROM notifications WHERE user_id = ? ORDER BY id DESC LIMIT 20",
@@ -756,11 +799,8 @@ app.get('/api/notifications', (req, res) => {
   );
 });
 
-app.post('/api/notifications/read', (req, res) => {
-  const { userId } = req.body;
-  if (!userId) {
-    return res.status(400).json({ error: "Missing userId" });
-  }
+app.post('/api/notifications/read', authenticateToken, (req, res) => {
+  const userId = req.user.id;
 
   db.run(
     "UPDATE notifications SET read_status = 1 WHERE user_id = ?",

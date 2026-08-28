@@ -98,7 +98,8 @@ export default function Auth({ onAuthSuccess }) {
     })
     .then((data) => {
       if (data.success) {
-        onAuthSuccess(data);
+        const { token, ...userData } = data;
+        onAuthSuccess(userData, token);
       }
     })
     .catch((err) => {
@@ -124,7 +125,8 @@ export default function Auth({ onAuthSuccess }) {
     })
     .then((data) => {
       if (data.success) {
-        onAuthSuccess(data);
+        const { token, ...userData } = data;
+        onAuthSuccess(userData, token);
       }
     })
     .catch((err) => {

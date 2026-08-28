@@ -14,6 +14,7 @@ import './App.css';
 
 export default function App() {
   const [user, setUser] = useState(null); // Authenticated User
+  const [token, setToken] = useState(null); // Signed JWT for authenticated API calls
   const [activeTab, setActiveTab] = useState('discover'); // dynamic tabs based on role
   const [musicians, setMusicians] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -28,6 +29,10 @@ export default function App() {
   // Check user session from localStorage on start
   useEffect(() => {
     const session = localStorage.getItem('jam_to_gig_session');
+    const savedToken = localStorage.getItem('jam_to_gig_token');
+    if (savedToken) {
+      setToken(savedToken);
+    }
     if (session) {
       const parsedUser = JSON.parse(session);
       setUser(parsedUser);
@@ -40,7 +45,9 @@ export default function App() {
   }, []);
 
   const fetchMusicians = () => {
-    fetch(`${API_BASE_URL}/api/musicians`)
+    fetch(`${API_BASE_URL}/api/musicians`, {
+      headers: { Authorization: `Bearer ${token}` }
+    })
       .then((res) => res.json())
       .then((data) => {
         setMusicians(data);
@@ -54,7 +61,9 @@ export default function App() {
 
   const fetchNotifications = () => {
     if (!user) return;
-    fetch(`${API_BASE_URL}/api/notifications?userId=${user.id}`)
+    fetch(`${API_BASE_URL}/api/notifications?userId=${user.id}`, {
+      headers: { Authorization: `Bearer ${token}` }
+    })
       .then(res => res.json())
       .then(data => setNotifications(data))
       .catch(err => console.error("Error loading notifications:", err));
@@ -70,9 +79,13 @@ export default function App() {
     }
   }, [user]);
 
-  const handleAuthSuccess = (userData) => {
+  const handleAuthSuccess = (userData, authToken) => {
     setUser(userData);
     localStorage.setItem('jam_to_gig_session', JSON.stringify(userData));
+    if (authToken) {
+      setToken(authToken);
+      localStorage.setItem('jam_to_gig_token', authToken);
+    }
     if (userData.userType === 'hirer') {
       setActiveTab('bands');
     } else {
@@ -88,7 +101,9 @@ export default function App() {
 
   const handleLogout = () => {
     setUser(null);
+    setToken(null);
     localStorage.removeItem('jam_to_gig_session');
+    localStorage.removeItem('jam_to_gig_token');
   };
 
   const handleOpenChat = (partner) => {
@@ -101,7 +116,10 @@ export default function App() {
       // Mark notifications as read in backend
       fetch(`${API_BASE_URL}/api/notifications/read`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
         body: JSON.stringify({ userId: user.id })
       })
       .then(() => fetchNotifications())
