@@ -129,10 +129,10 @@ export default function PrivateChat({ currentUser, token, chatPartner, onClose }
             onChange={e => setNewMessage(e.target.value)}
             style={{
               flex: 1,
-              background: 'rgba(255,255,255,0.03)',
+              background: 'rgba(15, 23, 42, 0.02)',
               border: '1px solid var(--glass-border)',
               borderRadius: '12px',
-              color: 'white',
+              color: 'var(--text-primary)',
               padding: '10px 14px',
               fontSize: '0.8rem',
               outline: 'none'

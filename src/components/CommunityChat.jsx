@@ -114,10 +114,10 @@ export default function CommunityChat({ user, token }) {
           onChange={e => setNewMessage(e.target.value)}
           style={{
             flex: 1,
-            background: 'rgba(255,255,255,0.03)',
+            background: 'rgba(15, 23, 42, 0.02)',
             border: '1px solid var(--glass-border)',
             borderRadius: '12px',
-            color: 'white',
+            color: 'var(--text-primary)',
             padding: '12px 16px',
             fontSize: '0.85rem',
             fontFamily: 'var(--font-body)',
