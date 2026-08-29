@@ -88,7 +88,7 @@ export default function CommunityChat({ user, token }) {
                   border: isMe ? 'none' : '1px solid var(--glass-border)',
                   borderRadius: isMe ? '16px 16px 2px 16px' : '16px 16px 16px 2px',
                   padding: '10px 14px',
-                  color: 'white',
+                  color: isMe ? 'white' : 'var(--text-primary)',
                   fontSize: '0.85rem',
                   lineHeight: '1.4',
                   boxShadow: isMe ? '0 4px 10px rgba(139, 92, 246, 0.2)' : 'none'

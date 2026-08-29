@@ -66,7 +66,7 @@ export default function PrivateChat({ currentUser, token, chatPartner, onClose }
               style={{ width: '32px', height: '32px', borderRadius: '50%' }}
             />
             <div>
-              <h4 style={{ margin: 0, color: 'white', fontSize: '0.9rem' }}>{chatPartner.name}</h4>
+              <h4 style={{ margin: 0, color: 'var(--text-primary)', fontSize: '0.9rem' }}>{chatPartner.name}</h4>
               <span style={{ fontSize: '0.65rem', color: 'var(--accent-cyan)', textTransform: 'uppercase', fontWeight: 700 }}>
                 {chatPartner.role || 'Collab Partner'}
               </span>
@@ -103,13 +103,13 @@ export default function PrivateChat({ currentUser, token, chatPartner, onClose }
                       border: isMe ? 'none' : '1px solid var(--glass-border)',
                       borderRadius: isMe ? '16px 16px 2px 16px' : '16px 16px 16px 2px',
                       padding: '10px 14px',
-                      color: 'white',
+                      color: isMe ? 'white' : 'var(--text-primary)',
                       fontSize: '0.8rem',
                       lineHeight: '1.4'
                     }}
                   >
                     {msg.message}
-                    <span style={{ display: 'block', fontSize: '0.55rem', color: 'rgba(255,255,255,0.6)', textAlign: 'right', marginTop: '3px' }}>
+                    <span style={{ display: 'block', fontSize: '0.55rem', color: isMe ? 'rgba(255,255,255,0.6)' : 'var(--text-muted)', textAlign: 'right', marginTop: '3px' }}>
                       {msg.timestamp}
                     </span>
                   </div>

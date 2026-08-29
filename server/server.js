@@ -1,9 +1,9 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
-const path = require('path');
-const fs = require('fs');
 const multer = require('multer');
+const { v2: cloudinary } = require('cloudinary');
+const { CloudinaryStorage } = require('multer-storage-cloudinary');
 const https = require('https');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
@@ -61,25 +61,29 @@ function authenticateToken(req, res, next) {
 app.use(cors());
 app.use(express.json());
 
-// Programmatically create uploads directory
-const uploadsDir = path.resolve(__dirname, 'uploads');
-if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir, { recursive: true });
+// --- Cloudinary (media storage) ---
+// Uploads go straight to Cloudinary now; nothing is written to local disk.
+if (!process.env.CLOUDINARY_CLOUD_NAME || !process.env.CLOUDINARY_API_KEY || !process.env.CLOUDINARY_API_SECRET) {
+  console.error('⚠️  Cloudinary is not fully configured. Add CLOUDINARY_CLOUD_NAME / CLOUDINARY_API_KEY / CLOUDINARY_API_SECRET to server/.env');
 }
-// Serve static uploads
-app.use('/uploads', express.static(uploadsDir));
-
-// Multer Storage Configuration
-const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    cb(null, uploadsDir);
-  },
-  filename: function (req, file, cb) {
-    // Unique file name prefixing timestamp
-    cb(null, Date.now() + '-' + file.originalname.replace(/\s+/g, '-'));
-  }
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET
 });
-const upload = multer({ storage: storage });
+
+// Multer storage adapter: streams the file to Cloudinary instead of ./uploads.
+// After upload, multer exposes file.path = the Cloudinary secure URL (already
+// absolute) and file.filename = the Cloudinary public_id.
+const storage = new CloudinaryStorage({
+  cloudinary,
+  params: (req, file) => ({
+    folder: 'jam-karo',
+    resource_type: 'auto', // 'image' for avatars, 'video' for audition reels
+    public_id: `${Date.now()}-${file.originalname.replace(/\.[^.]+$/, '').replace(/\s+/g, '-')}`
+  })
+});
+const upload = multer({ storage });
 
 // --- Postgres schema bootstrap (no pre-seeded dummy data) ---
 // Type notes vs the old SQLite schema:
@@ -386,17 +390,17 @@ app.post('/api/profiles/update', authenticateToken, upload.fields([
   const { name, neighborhood, role, skillLevel, genres, gear, bio } = req.body;
   const userId = req.user.id;
 
-  // Handle uploaded file URLs
+  // Uploaded files are already on Cloudinary; multer puts the absolute
+  // secure URL on file.path, so no reassembly with req.host is needed.
   let avatarUrl = undefined;
   let videoUrl = undefined;
 
   if (req.files) {
-    const uploadsBase = `${req.protocol}://${req.get('host')}/uploads/`;
     if (req.files['avatar'] && req.files['avatar'][0]) {
-      avatarUrl = `${uploadsBase}${req.files['avatar'][0].filename}`;
+      avatarUrl = req.files['avatar'][0].path;
     }
     if (req.files['video'] && req.files['video'][0]) {
-      videoUrl = `${uploadsBase}${req.files['video'][0].filename}`;
+      videoUrl = req.files['video'][0].path;
     }
   }
 
